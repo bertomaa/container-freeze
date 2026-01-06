@@ -1,0 +1,68 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-network-anomaly
+  namespace: kube-system
+spec:
+  # Monitor network connections to detect C2 communication
+  kprobes:
+  - call: "tcp_connect"
+    syscall: false
+    return: true
+    args:
+    - index: 0
+      type: "struct sock*"
+    returnArg:
+      type: "int"
+    selectors:
+    - matchActions:
+      - action: Post
+        rateLimit: "30s"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+
+  # Monitor DNS queries (could indicate DNS tunneling)
+  - call: "sys_sendto"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"  # socket fd
+    - index: 1
+      type: "char_buf"  # buffer
+      sizeArgIndex: 2
+    - index: 2
+      type: "size_t"  # length
+    selectors:
+    - matchActions:
+      - action: Post
+        rateLimit: "1m"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+
+  # Wget/curl downloads (payload fetch)
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "char_argv"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "In"
+        values:
+        - "/usr/bin/wget"
+        - "/usr/bin/curl"
+      matchActions:
+      - action: Alert
+        message: "ALERT: File download attempted - potential payload fetch"
+        rateLimit: "1m"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]

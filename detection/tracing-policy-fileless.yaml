@@ -1,0 +1,77 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-fileless-execution
+  namespace: kube-system
+spec:
+  # Detect execution of files from /tmp, /dev/shm (common malware locations)
+  kprobes:
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "char_argv"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Prefix"
+        values:
+        - "/tmp/"
+        - "/dev/shm/"
+        - "/var/tmp/"
+      matchActions:
+      - action: Alert
+        message: "CRITICAL: Execution from temporary directory - potential fileless malware"
+        rateLimit: "30s"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+
+  # Detect memfd_create (fileless execution technique)
+  - call: "sys_memfd_create"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "unsigned int"
+    selectors:
+    - matchActions:
+      - action: Alert
+        message: "CRITICAL: memfd_create detected - advanced fileless execution"
+        rateLimit: "1m"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+
+  # Detect python/bash/sh interpreters being spawned (common attack pattern)
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "char_argv"
+    selectors:
+    - matchArgs:
+      - index: 1  # Check argv for suspicious patterns
+        operator: "Contains"
+        values:
+        - "bash -i"  # Interactive bash (reverse shell)
+        - "sh -i"
+        - "/dev/tcp/"  # Bash TCP socket
+        - "nc -"  # Netcat
+        - "python -c"  # Python one-liner
+        - "curl http"  # Download and pipe
+      matchActions:
+      - action: Alert
+        message: "CRITICAL: Suspicious interpreter usage - likely hands-on-keyboard attacker"
+        rateLimit: "30s"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]

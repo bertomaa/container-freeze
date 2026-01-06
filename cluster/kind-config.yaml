@@ -1,0 +1,46 @@
+# kind cluster configuration with CRIU checkpoint support
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: container-freeze-cluster
+
+# Feature gates for checkpoint API (beta since 1.25)
+featureGates:
+  ContainerCheckpoint: true
+
+nodes:
+  - role: control-plane
+    # Mount host /tmp for checkpoint storage during demo
+    extraMounts:
+      - hostPath: /tmp/k8s-checkpoints
+        containerPath: /checkpoints
+    # Enable necessary kernel capabilities for CRIU
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            feature-gates: "ContainerCheckpoint=true"
+        controllerManager:
+          extraArgs:
+            feature-gates: "ContainerCheckpoint=true"
+    kubeadmConfigPatchesJSON6902:
+      - group: kubeadm.k8s.io
+        version: v1beta3
+        kind: ClusterConfiguration
+        patch: |
+          - op: add
+            path: /apiServer/extraArgs
+            value:
+              feature-gates: "ContainerCheckpoint=true"
+
+  - role: worker
+    extraMounts:
+      - hostPath: /tmp/k8s-checkpoints
+        containerPath: /checkpoints
+    labels:
+      forensics: enabled
+
+# Network configuration to allow C2 traffic for demo
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

@@ -1,0 +1,184 @@
+# Container Freeze - Kubernetes Forensics POC
+# .gitignore
+
+# ============================================================================
+# VM & Virtualization
+# ============================================================================
+# VM disk images
+*.qcow2
+*.img
+
+# Cloud-init files (auto-generated)
+vm/cloud-init.iso
+vm/user-data
+vm/meta-data
+
+# VM connection info (contains IP and paths)
+vm/connection.env
+
+# SSH keys (security)
+vm/id_rsa
+vm/id_rsa.pub
+*.pem
+*.key
+
+# ============================================================================
+# Kubernetes & Container Runtime
+# ============================================================================
+# Kubeconfig files
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Helm
+.helm/
+
+# kubectl cache
+.kubectl_cache/
+
+# Container runtime artifacts
+containerd/
+crio/
+
+# ============================================================================
+# Forensics & Checkpoint Data
+# ============================================================================
+# Checkpoint directories (from checkpoint-pod.sh)
+*_forensics.tar.gz
+*_checkpoint.tar
+*_processes.txt
+*_network.txt
+*_env.txt
+*_logs.txt
+*_events.txt
+*_describe.txt
+*_checkpoint.log
+
+# Temporary forensic data
+/tmp/k8s-checkpoints/
+/tmp/forensic-analysis/
+
+# Memory dumps
+*.dump
+*.core
+
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# ============================================================================
+# Docker & Container Images
+# ============================================================================
+# Don't ignore Dockerfiles, but ignore build artifacts
+.dockerignore
+
+# ============================================================================
+# Logs & Runtime Data
+# ============================================================================
+*.log
+logs/
+*.out
+
+# ============================================================================
+# IDE & Editors
+# ============================================================================
+# Claude Code
+.claude/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+.*.sw[a-p]
+
+# Emacs
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# OS Files
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================================================
+# Temporary & Backup Files
+# ============================================================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# ============================================================================
+# Security & Secrets
+# ============================================================================
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+secrets.yaml
+*-secret.yaml
+
+# Certificate files
+*.crt
+*.cert
+*.cer
+*.der
+
+# ============================================================================
+# Test & Coverage
+# ============================================================================
+coverage/
+.coverage
+htmlcov/
+.tox/
+
+# ============================================================================
+# Build Artifacts
+# ============================================================================
+*.tar.gz
+*.tar
+*.zip
+*.rar
+
+*.md

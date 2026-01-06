@@ -1,0 +1,78 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-reverse-shell
+  namespace: kube-system
+spec:
+  # Detect the classic reverse shell pattern:
+  # socket() -> connect() -> dup2() -> execve(/bin/sh)
+  kprobes:
+  - call: "sys_connect"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"
+    - index: 1
+      type: "struct sockaddr*"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: "NotEqual"
+        values:
+        - "127.0.0.1"  # Ignore localhost
+      matchActions:
+      - action: Post
+        rateLimit: "1m"
+        kernelStackTrace: true
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+
+  - call: "sys_dup2"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"
+    - index: 1
+      type: "int"
+    selectors:
+    - matchActions:
+      - action: Notify
+        rateLimit: "1m"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "char_argv"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Equal"
+        values:
+        - "/bin/sh"
+        - "/bin/bash"
+      matchActions:
+      - action: Alert
+        message: "ALERT: Potential reverse shell - shell executed after socket operations"
+        rateLimit: "1m"
+      matchLabels:
+      - key: "security.monitor"
+        operator: In
+        values: ["true"]
+---
+# ConfigMap to store alert configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tetragon-alerts
+  namespace: kube-system
+data:
+  webhook-url: "http://checkpoint-responder.kube-system.svc.cluster.local:8080/alert"
