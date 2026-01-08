@@ -7,6 +7,23 @@ set -e
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 cd ~/container-freeze
 
+# Detect if running interactively
+if [ -t 0 ]; then
+    INTERACTIVE=true
+else
+    INTERACTIVE=false
+fi
+
+# Helper function for interactive pauses
+pause_interactive() {
+    if [ "$INTERACTIVE" = true ]; then
+        read -p "$1"
+    else
+        echo "$1"
+        sleep 2
+    fi
+}
+
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║      Container Freeze POC - Kubernetes Forensics              ║"
 echo "║         Running on K3s with real eBPF support                 ║"
@@ -41,7 +58,7 @@ POD_NAME=$(kubectl get pods -n production -l app=payment-processor -o jsonpath='
 echo "Target pod: $POD_NAME"
 echo ""
 
-read -p "Press ENTER to start the attack simulation..."
+pause_interactive "Press ENTER to start the attack simulation..."
 echo ""
 
 # ============================================================================
@@ -68,7 +85,7 @@ echo "Malware logs:"
 kubectl logs -n production "$POD_NAME" -c malware-sidecar --tail=30
 
 echo ""
-read -p "Press ENTER to check Tetragon detection..."
+pause_interactive "Press ENTER to check Tetragon detection..."
 echo ""
 
 # ============================================================================
@@ -87,7 +104,7 @@ kubectl logs -n kube-system "$TETRAGON_POD" -c export-stdout --tail=50 | \
     echo "(Events may take a moment to appear)"
 
 echo ""
-read -p "Press ENTER to checkpoint the compromised pod..."
+pause_interactive "Press ENTER to checkpoint the compromised pod..."
 echo ""
 
 # ============================================================================
@@ -156,11 +173,12 @@ fi
 echo ""
 echo "Creating forensic bundle..."
 cd /tmp/k8s-checkpoints
-tar -czf "${POD_NAME}_${TIMESTAMP}_forensics.tar.gz" "${POD_NAME}_${TIMESTAMP}/"
+sudo tar -czf "${POD_NAME}_${TIMESTAMP}_forensics.tar.gz" "${POD_NAME}_${TIMESTAMP}/"
+sudo chown cfuser:cfuser "${POD_NAME}_${TIMESTAMP}_forensics.tar.gz"
 echo "  ✓ Bundle: /tmp/k8s-checkpoints/${POD_NAME}_${TIMESTAMP}_forensics.tar.gz"
 
 echo ""
-read -p "Press ENTER to isolate the pod..."
+pause_interactive "Press ENTER to isolate the pod..."
 echo ""
 
 # ============================================================================
@@ -204,7 +222,7 @@ kubectl exec -n production "$POD_NAME" -c malware-sidecar -- \
     timeout 3 curl -v http://c2-server.attacker-infra.svc.cluster.local:8080 2>&1 || echo "✓ C2 connection blocked (expected)"
 
 echo ""
-read -p "Press ENTER to analyze forensic data..."
+pause_interactive "Press ENTER to analyze forensic data..."
 echo ""
 
 # ============================================================================
