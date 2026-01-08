@@ -33,15 +33,17 @@ echo "  ✓ Internet accessible"
 
 # Install packages
 echo "[2/6] Installing packages..."
-$SSH "sudo apt-get update && sudo apt-get install -y curl docker.io jq"
+$SSH "sudo apt-get update && sudo apt-get install -y curl docker.io jq criu"
 $SSH "sudo systemctl enable docker && sudo systemctl start docker"
 $SSH "sudo usermod -aG docker cfuser"
 echo "  ✓ Packages installed"
 
 # Install K3s
 echo "[3/6] Installing K3s..."
-$SSH "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--disable traefik --write-kubeconfig-mode 644' sh -"
-echo "  ✓ K3s installed"
+# Pin to v1.32.11+k3s1 (containerd 2.1.5 with CRIU support)
+# CRIU checkpoint requires containerd 2.0+ (added in v1.31.6 & v1.32.2, Feb 2025)
+$SSH "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.11+k3s1' INSTALL_K3S_EXEC='--disable traefik --write-kubeconfig-mode 644' sh -"
+echo "  ✓ K3s v1.32.11+k3s1 installed (containerd 2.1.5 with CRIU support)"
 
 # Add KUBECONFIG to .bashrc for interactive sessions
 $SSH "echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc"

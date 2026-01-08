@@ -133,11 +133,20 @@ if [ -n "$CONTAINER_ID" ]; then
     echo "  Container ID: $CONTAINER_ID"
 
     # Try crictl checkpoint
-    if sudo crictl checkpoint --export="$CHECKPOINT_DIR/checkpoint.tar" "$CONTAINER_ID" 2>/dev/null; then
+    echo "  Attempting checkpoint (this may take a moment)..."
+    if sudo crictl checkpoint --export="$CHECKPOINT_DIR/checkpoint.tar" "$CONTAINER_ID" 2>&1 | tee "$CHECKPOINT_DIR/criu-error.log"; then
         echo "  ✓ CRIU checkpoint created"
     else
-        echo "  ⚠️  CRIU checkpoint failed (may need additional kernel config)"
+        echo "  ⚠️  CRIU checkpoint failed"
+        echo "  ℹ️  Error details saved to: $CHECKPOINT_DIR/criu-error.log"
         echo "  ℹ️  Continuing with metadata-based forensics..."
+
+        # Show first few lines of error
+        if [ -f "$CHECKPOINT_DIR/criu-error.log" ]; then
+            echo ""
+            echo "  Debug info:"
+            head -10 "$CHECKPOINT_DIR/criu-error.log" | sed 's/^/    /'
+        fi
     fi
 else
     echo "  ⚠️  Could not get container ID"
