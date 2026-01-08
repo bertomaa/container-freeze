@@ -1,11 +1,11 @@
 #!/bin/bash
-# Run the complete POC on the VM
-# This script should be run FROM INSIDE the VM
+# Payment Breach Demo - Run script
+# This script runs INSIDE the VM
 
 set -e
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-cd ~/container-freeze
+cd ~/container-freeze/current-demo
 
 # Detect if running interactively
 if [ -t 0 ]; then
@@ -24,18 +24,22 @@ pause_interactive() {
     fi
 }
 
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║      Container Freeze POC - Kubernetes Forensics              ║"
-echo "║         Running on K3s with real eBPF support                 ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "========================================================================"
+echo "       PAYMENT SYSTEM BREACH - Supply Chain Attack Demo"
+echo "========================================================================"
+echo ""
+echo "Scenario: A compromised dependency has injected a malware sidecar"
+echo "          into the payment processor deployment. The malware lies"
+echo "          dormant until triggered by a backdoor endpoint."
 echo ""
 
 # ============================================================================
 # Phase 1: Verify Environment
 # ============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo "Phase 1: Environment Check"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo ""
 
 echo "Kubernetes cluster:"
@@ -64,9 +68,9 @@ echo ""
 # ============================================================================
 # Phase 2: Trigger Attack
 # ============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo "Phase 2: Triggering Attack"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo ""
 echo "Simulating attacker finding backdoor endpoint..."
 echo ""
@@ -76,7 +80,7 @@ kubectl exec -n production "$POD_NAME" -c app -- \
     curl -s http://localhost:8080/.env
 
 echo ""
-echo "✓ Backdoor triggered - malware activation signal sent"
+echo "[+] Backdoor triggered - malware activation signal sent"
 echo ""
 
 sleep 5
@@ -91,9 +95,9 @@ echo ""
 # ============================================================================
 # Phase 3: eBPF Detection
 # ============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo "Phase 3: eBPF Detection (Tetragon)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo ""
 
 TETRAGON_POD=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tetragon -o jsonpath='{.items[0].metadata.name}')
@@ -110,9 +114,9 @@ echo ""
 # ============================================================================
 # Phase 4: Forensic Checkpoint
 # ============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo "Phase 4: Forensic Checkpoint (CRIU)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo ""
 
 mkdir -p /tmp/k8s-checkpoints
@@ -123,23 +127,23 @@ mkdir -p "$CHECKPOINT_DIR"
 echo "Capturing pre-checkpoint forensic data..."
 
 # Capture process list
-echo "  → Process list..."
+echo "  -> Process list..."
 kubectl exec -n production "$POD_NAME" -c malware-sidecar -- ps aux > "$CHECKPOINT_DIR/processes.txt" 2>/dev/null || true
 
 # Capture network connections
-echo "  → Network connections..."
+echo "  -> Network connections..."
 kubectl exec -n production "$POD_NAME" -c malware-sidecar -- netstat -antp > "$CHECKPOINT_DIR/network.txt" 2>/dev/null || true
 
 # Capture environment variables (contains the secrets!)
-echo "  → Environment variables..."
+echo "  -> Environment variables..."
 kubectl exec -n production "$POD_NAME" -c malware-sidecar -- env | sort > "$CHECKPOINT_DIR/env.txt" 2>/dev/null || true
 
 # Capture container logs
-echo "  → Container logs..."
+echo "  -> Container logs..."
 kubectl logs -n production "$POD_NAME" -c malware-sidecar > "$CHECKPOINT_DIR/malware_logs.txt" 2>/dev/null || true
 kubectl logs -n production "$POD_NAME" -c app > "$CHECKPOINT_DIR/app_logs.txt" 2>/dev/null || true
 
-# Try CRIU checkpoint (may require additional setup)
+# Try CRIU checkpoint
 echo ""
 echo "Attempting CRIU checkpoint..."
 
@@ -152,11 +156,11 @@ if [ -n "$CONTAINER_ID" ]; then
     # Try crictl checkpoint
     echo "  Attempting checkpoint (this may take a moment)..."
     if sudo crictl checkpoint --export="$CHECKPOINT_DIR/checkpoint.tar" "$CONTAINER_ID" 2>&1 | tee "$CHECKPOINT_DIR/criu-error.log"; then
-        echo "  ✓ CRIU checkpoint created"
+        echo "  [+] CRIU checkpoint created"
     else
-        echo "  ⚠️  CRIU checkpoint failed"
-        echo "  ℹ️  Error details saved to: $CHECKPOINT_DIR/criu-error.log"
-        echo "  ℹ️  Continuing with metadata-based forensics..."
+        echo "  [!] CRIU checkpoint failed"
+        echo "  [i] Error details saved to: $CHECKPOINT_DIR/criu-error.log"
+        echo "  [i] Continuing with metadata-based forensics..."
 
         # Show first few lines of error
         if [ -f "$CHECKPOINT_DIR/criu-error.log" ]; then
@@ -166,7 +170,7 @@ if [ -n "$CONTAINER_ID" ]; then
         fi
     fi
 else
-    echo "  ⚠️  Could not get container ID"
+    echo "  [!] Could not get container ID"
 fi
 
 # Create forensic bundle
@@ -175,7 +179,7 @@ echo "Creating forensic bundle..."
 cd /tmp/k8s-checkpoints
 sudo tar -czf "${POD_NAME}_${TIMESTAMP}_forensics.tar.gz" "${POD_NAME}_${TIMESTAMP}/"
 sudo chown cfuser:cfuser "${POD_NAME}_${TIMESTAMP}_forensics.tar.gz"
-echo "  ✓ Bundle: /tmp/k8s-checkpoints/${POD_NAME}_${TIMESTAMP}_forensics.tar.gz"
+echo "  [+] Bundle: /tmp/k8s-checkpoints/${POD_NAME}_${TIMESTAMP}_forensics.tar.gz"
 
 echo ""
 pause_interactive "Press ENTER to isolate the pod..."
@@ -184,9 +188,9 @@ echo ""
 # ============================================================================
 # Phase 5: Network Isolation
 # ============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo "Phase 5: Network Isolation"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo ""
 
 # Apply NetworkPolicy
@@ -214,12 +218,12 @@ spec:
   ingress: []
 EOF
 
-echo "✓ NetworkPolicy applied - pod is now quarantined"
+echo "[+] NetworkPolicy applied - pod is now quarantined"
 echo ""
 
 echo "Verifying isolation (C2 connection should fail)..."
 kubectl exec -n production "$POD_NAME" -c malware-sidecar -- \
-    timeout 3 curl -v http://c2-server.attacker-infra.svc.cluster.local:8080 2>&1 || echo "✓ C2 connection blocked (expected)"
+    timeout 3 curl -v http://c2-server.attacker-infra.svc.cluster.local:8080 2>&1 || echo "[+] C2 connection blocked (expected)"
 
 echo ""
 pause_interactive "Press ENTER to analyze forensic data..."
@@ -228,55 +232,54 @@ echo ""
 # ============================================================================
 # Phase 6: Forensic Analysis
 # ============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo "Phase 6: Forensic Analysis"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------------"
 echo ""
 
 cd "$CHECKPOINT_DIR"
 
-echo "🔍 CREDENTIALS FOUND IN ENVIRONMENT:"
-echo "────────────────────────────────────────"
+echo "CREDENTIALS FOUND IN ENVIRONMENT:"
+echo "------------------------------------"
 grep -E "KEY|SECRET|PASSWORD|TOKEN|STRIPE" env.txt 2>/dev/null | while IFS='=' read -r key value; do
-    echo "  🔑 $key = $value"
+    echo "  [!] $key = $value"
 done
 echo ""
 
-echo "🔍 SUSPICIOUS PROCESSES:"
-echo "────────────────────────────────────────"
+echo "SUSPICIOUS PROCESSES:"
+echo "------------------------------------"
 grep -E "bash|sh|nc|curl|wget|python" processes.txt 2>/dev/null | head -10 || echo "  (none found)"
 echo ""
 
-echo "🔍 NETWORK CONNECTIONS:"
-echo "────────────────────────────────────────"
+echo "NETWORK CONNECTIONS:"
+echo "------------------------------------"
 grep -E "ESTABLISHED|LISTEN|attacker" network.txt 2>/dev/null | head -10 || echo "  (none found)"
 echo ""
 
-echo "🔍 MALWARE ACTIVITY LOG:"
-echo "────────────────────────────────────────"
+echo "MALWARE ACTIVITY LOG:"
+echo "------------------------------------"
 grep -E "MALWARE|C2|exfil|ACTIVATED" malware_logs.txt 2>/dev/null | head -20 || echo "  (check malware_logs.txt)"
 echo ""
 
 # If checkpoint exists, analyze it
 if [ -f "checkpoint.tar" ]; then
-    echo "🔍 CHECKPOINT MEMORY ANALYSIS:"
-    echo "────────────────────────────────────────"
+    echo "CHECKPOINT MEMORY ANALYSIS:"
+    echo "------------------------------------"
     echo "Extracting strings from memory dump..."
     tar -tf checkpoint.tar 2>/dev/null | head -20
-    # Could extract and analyze memory pages here
 fi
 
 echo ""
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║                    POC COMPLETE                               ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
+echo "========================================================================"
+echo "                         DEMO COMPLETE"
+echo "========================================================================"
 echo ""
 echo "Summary:"
-echo "  ✓ Attack triggered and executed"
-echo "  ✓ eBPF (Tetragon) detected suspicious syscalls"
-echo "  ✓ Forensic data captured before evidence destruction"
-echo "  ✓ Pod isolated (attacker cut off from C2)"
-echo "  ✓ Credentials extracted from captured data"
+echo "  [+] Attack triggered and executed"
+echo "  [+] eBPF (Tetragon) detected suspicious syscalls"
+echo "  [+] Forensic data captured before evidence destruction"
+echo "  [+] Pod isolated (attacker cut off from C2)"
+echo "  [+] Credentials extracted from captured data"
 echo ""
 echo "Forensic evidence location:"
 echo "  $CHECKPOINT_DIR/"

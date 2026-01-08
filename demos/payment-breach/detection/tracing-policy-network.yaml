@@ -1,0 +1,40 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-network-anomaly
+spec:
+  # Monitor network connections to detect C2 communication
+  kprobes:
+  - call: "tcp_connect"
+    syscall: false
+    return: true
+    args:
+    - index: 0
+      type: "sock"
+    returnArg:
+      type: "int"
+
+  # Monitor DNS queries (could indicate DNS tunneling)
+  - call: "udp_sendmsg"
+    syscall: false
+    args:
+    - index: 0
+      type: "sock"
+    - index: 1
+      type: "msghdr"
+
+  # Wget/curl downloads (payload fetch)
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "In"
+        values:
+        - "/usr/bin/wget"
+        - "/usr/bin/curl"
+        - "/bin/wget"
+        - "/bin/curl"

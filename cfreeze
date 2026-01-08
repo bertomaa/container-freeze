@@ -1,13 +1,17 @@
 #!/bin/bash
-# Container Freeze - Unified CLI
-# Main interface for managing the Container Freeze POC environment
+# Container Freeze - Unified CLI with Interactive Mode
+# Main interface for managing the Container Freeze environment
 
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_ROOT"
 
-# Colors using tput (more portable)
+# Source libraries
+source "$PROJECT_ROOT/lib/gum.sh"
+source "$PROJECT_ROOT/lib/demos.sh"
+
+# Colors using tput (fallback for non-gum output)
 if command -v tput &> /dev/null && [ -t 1 ]; then
     RED=$(tput setaf 1)
     GREEN=$(tput setaf 2)
@@ -26,33 +30,13 @@ else
     NC=''
 fi
 
-# Helper functions
-print_header() {
-    echo "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo "${CYAN}║${NC} ${BOLD}$1${NC}"
-    echo "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
-}
-
-print_step() {
-    echo "${BLUE}▶${NC} ${BOLD}$1${NC}"
-}
-
-print_success() {
-    echo "${GREEN}✓${NC} $1"
-}
-
-print_warning() {
-    echo "${YELLOW}⚠${NC} $1"
-}
-
-print_error() {
-    echo "${RED}✗${NC} $1"
-}
+# VM connection helpers
+VM_DIR="$PROJECT_ROOT/vm"
 
 # Check VM status
 check_vm() {
-    if [ -f "./vm/connection.env" ]; then
-        source ./vm/connection.env
+    if [ -f "$VM_DIR/connection.env" ]; then
+        source "$VM_DIR/connection.env"
         if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=2 cfuser@"$VM_IP" "exit" 2>/dev/null; then
             return 0
         fi
@@ -65,7 +49,7 @@ check_k3s() {
     if ! check_vm; then
         return 1
     fi
-    source ./vm/connection.env
+    source "$VM_DIR/connection.env"
     SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
     if $SSH "kubectl get nodes" 2>/dev/null | grep -q "Ready"; then
         return 0
@@ -73,105 +57,349 @@ check_k3s() {
     return 1
 }
 
-# Check POC deployment status
-check_poc() {
+# Check if demo is deployed
+check_demo_deployed() {
     if ! check_k3s; then
         return 1
     fi
-    source ./vm/connection.env
+    source "$VM_DIR/connection.env"
     SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
-    if $SSH "kubectl get pods -n production 2>/dev/null | grep payment-processor | grep -q Running"; then
+    if $SSH "kubectl get pods -A 2>/dev/null | grep -q Running"; then
         return 0
     fi
     return 1
 }
 
-# Show status
+# ============================================================================
+# Interactive Menu Commands
+# ============================================================================
+
+cmd_interactive() {
+    while true; do
+        clear
+        print_banner
+
+        local current_demo=$(get_current_demo)
+        if [ -n "$current_demo" ]; then
+            gum style --foreground 8 "Current demo: $current_demo"
+        fi
+        echo ""
+
+        local choice=$(gum choose \
+            --cursor.foreground="14" \
+            --header "Select an action:" \
+            "Status" \
+            "Demo" \
+            "Setup" \
+            "Reset" \
+            "SSH" \
+            "Destroy" \
+            "Help" \
+            "Exit")
+
+        case "$choice" in
+            Status)   cmd_status; pause_continue ;;
+            Demo)     cmd_demo_interactive ;;
+            Setup)    cmd_setup_interactive ;;
+            Reset)    cmd_reset_interactive ;;
+            SSH)      cmd_ssh ;;
+            Destroy)  cmd_destroy_interactive ;;
+            Help)     cmd_help | gum_pager ;;
+            Exit)     exit 0 ;;
+            "")       exit 0 ;;
+        esac
+    done
+}
+
+pause_continue() {
+    echo ""
+    read -p "Press ENTER to continue..."
+}
+
+cmd_demo_interactive() {
+    # Build demo list
+    local demo_paths=()
+    local demo_names=()
+
+    while IFS='|' read -r path name desc; do
+        demo_paths+=("$path")
+        demo_names+=("$name")
+    done < <(list_demos_formatted)
+
+    if [ ${#demo_names[@]} -eq 0 ]; then
+        print_error "No demos found in demos/ directory"
+        pause_continue
+        return
+    fi
+
+    # Add Back option
+    demo_names+=("Back")
+
+    local selected=$(gum choose \
+        --cursor.foreground="14" \
+        --header "Select Demo Scenario:" \
+        "${demo_names[@]}")
+
+    if [ "$selected" = "Back" ] || [ -z "$selected" ]; then
+        return
+    fi
+
+    # Find selected demo path
+    for i in "${!demo_names[@]}"; do
+        if [ "${demo_names[$i]}" = "$selected" ]; then
+            cmd_demo_actions "${demo_paths[$i]}"
+            return
+        fi
+    done
+}
+
+cmd_demo_actions() {
+    local demo_path="$1"
+    local demo_name=$(get_demo_info "$demo_path" "display_name")
+    local demo_desc=$(get_demo_info "$demo_path" "description")
+
+    while true; do
+        clear
+        gum style \
+            --border rounded \
+            --border-foreground 14 \
+            --padding "1 2" \
+            --margin "1 0" \
+            "$(gum style --bold --foreground 14 "$demo_name")
+
+$demo_desc"
+
+        local current=$(get_current_demo)
+        local demo_basename=$(basename "$demo_path")
+
+        if [ "$current" = "$demo_basename" ]; then
+            gum style --foreground 2 "[Currently deployed]"
+        fi
+
+        echo ""
+
+        local action=$(gum choose \
+            --cursor.foreground="14" \
+            --header "What would you like to do?" \
+            "Run Demo" \
+            "Deploy Only" \
+            "Back")
+
+        case "$action" in
+            "Run Demo")
+                if [ "$current" != "$demo_basename" ]; then
+                    switch_demo "$demo_path"
+                fi
+                run_demo "$demo_path"
+                pause_continue
+                ;;
+            "Deploy Only")
+                if [ "$current" != "$demo_basename" ]; then
+                    switch_demo "$demo_path"
+                else
+                    if gum confirm "Demo already deployed. Redeploy?"; then
+                        switch_demo "$demo_path"
+                    fi
+                fi
+                pause_continue
+                ;;
+            "Back"|"")
+                return
+                ;;
+        esac
+    done
+}
+
+cmd_setup_interactive() {
+    clear
+    print_banner
+
+    if ! check_vm; then
+        gum style --foreground 3 "VM not running. Starting full setup..."
+        echo ""
+
+        if gum confirm "This will create a new VM and install K3s. Continue?"; then
+            gum spin --spinner dot --title "Creating VM..." -- "$PROJECT_ROOT/vm/setup-vm.sh"
+            gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+
+            # Now select and deploy a demo
+            echo ""
+            gum style --foreground 14 "Setup complete! Now select a demo to deploy:"
+            echo ""
+            cmd_demo_interactive
+        fi
+    else
+        gum style --foreground 2 "VM is already running."
+        echo ""
+
+        if ! check_k3s; then
+            if gum confirm "K3s not running. Install K3s?"; then
+                gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+            fi
+        else
+            gum style --foreground 2 "K3s is already running."
+
+            local current=$(get_current_demo)
+            if [ -n "$current" ]; then
+                gum style --foreground 8 "Current demo: $current"
+            fi
+        fi
+        pause_continue
+    fi
+}
+
+cmd_reset_interactive() {
+    clear
+    print_banner
+
+    if ! check_vm; then
+        print_error "VM not running. Run Setup first."
+        pause_continue
+        return
+    fi
+
+    local current=$(get_current_demo)
+    local msg="This will reset K3s and redeploy"
+    if [ -n "$current" ]; then
+        msg="$msg the '$current' demo"
+    fi
+
+    gum style --foreground 3 "$msg"
+    echo ""
+
+    if gum confirm "Continue with reset?"; then
+        gum spin --spinner dot --title "Cleaning K3s..." -- "$PROJECT_ROOT/cleanup-cluster.sh"
+        gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+
+        if [ -n "$current" ]; then
+            local demo_path=$(get_current_demo_path)
+            if [ -d "$demo_path" ]; then
+                deploy_demo "$demo_path"
+            fi
+        fi
+
+        print_success "Reset complete!"
+    fi
+    pause_continue
+}
+
+cmd_destroy_interactive() {
+    clear
+    print_banner
+
+    gum style --foreground 1 --bold "WARNING: This will destroy the VM and all data!"
+    echo ""
+
+    if gum confirm --default=false "Are you sure you want to destroy everything?"; then
+        "$PROJECT_ROOT/destroy.sh"
+        # Clear current demo state
+        rm -f "$CURRENT_DEMO_FILE"
+        print_success "Environment destroyed"
+    fi
+    pause_continue
+}
+
+# ============================================================================
+# Non-Interactive Commands (CLI mode)
+# ============================================================================
+
 cmd_status() {
     echo ""
-    cat << 'EOF'
-          ❄ ░▒▓  CONTAINER FREEZE  ▓▒░ ❄
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                   System Status
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
+    gum style \
+        --border double \
+        --border-foreground 14 \
+        --padding "0 2" \
+        "CONTAINER FREEZE - Status"
     echo ""
 
     echo "${BOLD}Environment:${NC}"
     if check_vm; then
         print_success "VM is running"
-        source ./vm/connection.env
-        echo -e "  IP: ${CYAN}$VM_IP${NC}"
+        source "$VM_DIR/connection.env"
+        echo "  IP: ${CYAN}$VM_IP${NC}"
     else
         print_error "VM is not running"
     fi
 
     if check_k3s; then
         print_success "K3s cluster is running"
+        source "$VM_DIR/connection.env"
         SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
-        echo -e "  Nodes:"
-        $SSH "kubectl get nodes" | tail -n +2 | sed 's/^/    /'
+        echo "  Nodes:"
+        $SSH "kubectl get nodes" 2>/dev/null | tail -n +2 | sed 's/^/    /'
     else
         print_error "K3s cluster is not running"
     fi
 
-    if check_poc; then
-        print_success "POC workloads are deployed"
-        echo -e "\n${BOLD}Pods:${NC}"
-        $SSH "kubectl get pods -A | grep -E 'production|attacker|tetragon'" | sed 's/^/  /'
+    local current=$(get_current_demo)
+    if [ -n "$current" ]; then
+        echo ""
+        echo "${BOLD}Current Demo:${NC} ${CYAN}$current${NC}"
+
+        if check_demo_deployed; then
+            print_success "Demo workloads are deployed"
+            echo ""
+            echo "${BOLD}Pods:${NC}"
+            source "$VM_DIR/connection.env"
+            SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
+            $SSH "kubectl get pods -A 2>/dev/null | grep -v kube-system | grep -v ^NAMESPACE" | sed 's/^/  /' || true
+        fi
     else
-        print_warning "POC workloads are not deployed"
+        print_warning "No demo deployed"
     fi
 
-    if check_vm; then
-        echo -e "\n${BOLD}Docker Images:${NC}"
-        $SSH "sudo docker images | grep -E 'localhost/|REPOSITORY'" | sed 's/^/  /' || print_warning "No images built"
-    fi
+    echo ""
+
+    # List available demos
+    echo "${BOLD}Available Demos:${NC}"
+    while IFS='|' read -r path name desc; do
+        local mark=" "
+        if [ "$(basename "$path")" = "$current" ]; then
+            mark="${GREEN}*${NC}"
+        fi
+        echo "  $mark $name"
+    done < <(list_demos_formatted)
 
     echo ""
 }
 
-# Setup command
 cmd_setup() {
-    print_header "Container Freeze - Full Setup"
+    gum style --border rounded --padding "0 2" "Container Freeze - Setup"
     echo ""
-    ./setup.sh "$@"
+    "$PROJECT_ROOT/setup.sh" "$@"
 }
 
-# Demo command
-cmd_demo() {
-    print_header "Container Freeze - Running Demo"
-    echo ""
-    if ! check_poc; then
-        print_error "POC not deployed. Run 'cfreeze setup' first"
-        exit 1
+cmd_demo_cli() {
+    local demo_name="$1"
+
+    if [ -z "$demo_name" ]; then
+        # List demos and exit
+        echo "Available demos:"
+        while IFS='|' read -r path name desc; do
+            echo "  $(basename "$path"): $name"
+        done < <(list_demos_formatted)
+        echo ""
+        echo "Usage: cfreeze demo <demo-name>"
+        return 1
     fi
-    ./demo.sh "$@"
+
+    local demo_path="$DEMOS_DIR/$demo_name"
+    if [ ! -d "$demo_path" ]; then
+        print_error "Demo '$demo_name' not found"
+        return 1
+    fi
+
+    local current=$(get_current_demo)
+    if [ "$current" != "$demo_name" ]; then
+        echo "Switching to demo: $demo_name"
+        switch_demo "$demo_path"
+    fi
+
+    run_demo "$demo_path"
 }
 
-# Build images command
-cmd_build() {
-    print_header "Container Freeze - Building Images"
-    echo ""
-    ./build-images.sh
-}
-
-# Cleanup cluster command
-cmd_cleanup() {
-    print_header "Container Freeze - Cluster Cleanup"
-    echo ""
-    ./cleanup-cluster.sh
-}
-
-# Reset command (cleanup + reinstall K3s + redeploy)
 cmd_reset() {
-    echo ""
-    cat << 'EOF'
-          ❄ ░▒▓  CONTAINER FREEZE  ▓▒░ ❄
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-              Quick Reset: Melt & Refreeze
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
+    gum style --border rounded --padding "0 2" "Container Freeze - Reset"
     echo ""
 
     if ! check_vm; then
@@ -179,183 +407,116 @@ EOF
         exit 1
     fi
 
-    print_step "Step 1/3: Cleaning up K3s cluster..."
-    ./cleanup-cluster.sh
+    print_step "Cleaning K3s cluster..."
+    "$PROJECT_ROOT/cleanup-cluster.sh"
 
-    echo ""
-    print_step "Step 2/3: Reinstalling K3s..."
-    ./vm/install-k3s.sh
+    print_step "Reinstalling K3s..."
+    "$PROJECT_ROOT/vm/install-k3s.sh"
 
-    echo ""
-    print_step "Step 3/3: Deploying POC..."
-    ./vm/deploy-poc.sh
+    local current=$(get_current_demo)
+    if [ -n "$current" ]; then
+        local demo_path=$(get_current_demo_path)
+        if [ -d "$demo_path" ]; then
+            print_step "Redeploying demo: $current"
+            deploy_demo "$demo_path"
+        fi
+    fi
 
-    echo ""
-    cat << 'EOF'
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            ❄ Reset Complete - Refrozen! ❄
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
-    echo ""
-    print_success "Cluster has been reset and POC redeployed"
-    echo ""
-    echo "Run the demo:"
-    echo "  ${CYAN}cfreeze demo${NC}"
-    echo ""
+    print_success "Reset complete!"
 }
 
-# Destroy command
+cmd_cleanup() {
+    gum style --border rounded --padding "0 2" "Container Freeze - Cleanup"
+    echo ""
+    "$PROJECT_ROOT/cleanup-cluster.sh"
+}
+
 cmd_destroy() {
-    print_header "Container Freeze - Full Cleanup"
+    gum style --border rounded --padding "0 2" "Container Freeze - Destroy"
     echo ""
-    ./destroy.sh
+    "$PROJECT_ROOT/destroy.sh"
+    rm -f "$CURRENT_DEMO_FILE"
 }
 
-# SSH command
 cmd_ssh() {
     if ! check_vm; then
         print_error "VM not running"
         exit 1
     fi
-    ./vm/ssh.sh
+    "$VM_DIR/ssh.sh"
 }
 
-# Show ASCII art banner (ANSI Shadow style with ice colors)
-print_banner() {
-    # Ice blue colors for frozen theme
-    local ICE_BLUE=$(tput setaf 14 2>/dev/null || tput setaf 6)  # Bright cyan
-    local FROST=$(tput setaf 7 2>/dev/null || echo '')            # White
-    local COLD_BLUE=$(tput setaf 12 2>/dev/null || tput setaf 4) # Bright blue
-    local RESET=$(tput sgr0 2>/dev/null || echo '')
-
-    cat << EOF
-${ICE_BLUE}
-     ╔══════════════════════════════════════════════════════════════╗
-     ║                                                              ║
-     ║   ${FROST}█████╗${ICE_BLUE} ███████╗██████╗  ███████╗███████╗███████╗███████╗   ║
-     ║  ${FROST}██╔══██╗${ICE_BLUE}██╔════╝██╔══██╗██╔════╝██╔════╝╚══███╔╝██╔═════╝   ║
-     ║  ${FROST}██║  ╚═╝${ICE_BLUE}█████╗  ██████╔╝█████╗  █████╗    ███╔╝ █████╗      ║
-     ║  ${FROST}██║  ██╗${ICE_BLUE}██╔══╝  ██╔══██╗██╔══╝  ██╔══╝   ███╔╝  ██╔══╝      ║
-     ║  ${FROST}╚█████╔╝${ICE_BLUE}██║     ██║  ██║███████╗███████╗███████╗███████╗    ║
-     ║   ${FROST}╚════╝${ICE_BLUE} ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝    ║
-     ║                                                              ║
-     ║        ${COLD_BLUE}❄  ░▒▓  "They're Inside. Now What?"  ▓▒░  ❄${ICE_BLUE}           ║
-     ║                                                              ║
-     ║            ${FROST}Kubernetes Forensics & Live Containment${ICE_BLUE}           ║
-     ║                                                              ║
-     ╚══════════════════════════════════════════════════════════════╝
-${RESET}
-EOF
-}
-
-# Alternative banner (geometric COLD style with ice colors)
-print_banner_alt() {
-    local ICE_BLUE=$(tput setaf 14 2>/dev/null || tput setaf 6)
-    local FROST=$(tput setaf 7 2>/dev/null || echo '')
-    local COLD_BLUE=$(tput setaf 12 2>/dev/null || tput setaf 4)
-    local RESET=$(tput sgr0 2>/dev/null || echo '')
-
-    cat << EOF
-${ICE_BLUE}
-     ╔═══════════════════════════════════════════════════════════════╗
-     ║                                                               ║
-     ║      ${FROST}❄  ${COLD_BLUE}░▒▓${FROST}  CONTAINER FREEZE  ${COLD_BLUE}▓▒░  ${FROST}❄${ICE_BLUE}                      ║
-     ║           ${COLD_BLUE}"They're Inside. Now What?"${ICE_BLUE}                        ║
-     ║                                                               ║
-     ║         ${FROST}___           ___           ___           ___${ICE_BLUE}        ║
-     ║        ${FROST}/\\  \\         /\\  \\         /\\  \\         /\\  \\${ICE_BLUE}       ║
-     ║       ${FROST}/::\\  \\       /::\\  \\       /::\\  \\       /::\\  \\${ICE_BLUE}      ║
-     ║      ${FROST}/:/\\:\\  \\     /:/\\:\\  \\     /:/\\:\\  \\     /:/\\:\\  \\${ICE_BLUE}     ║
-     ║     ${FROST}/:/  \\:\\  \\   /::\\~\\:\\  \\   /::\\~\\:\\  \\   /::\\~\\:\\  \\${ICE_BLUE}    ║
-     ║    ${FROST}/:/__/ \\:\\__\\ /:/\\:\\ \\:\\__\\ /:/\\:\\ \\:\\__\\ /:/\\:\\ \\:\\__\\${ICE_BLUE}   ║
-     ║    ${FROST}\\:\\  \\  \\/__/ \\/_|::\\/:/  / \\:\\~\\:\\ \\/__/ \\:\\~\\:\\ \\/__/${ICE_BLUE}   ║
-     ║     ${FROST}\\:\\  \\          |:|::/  /   \\:\\ \\:\\__\\    \\:\\ \\:\\__\\${ICE_BLUE}     ║
-     ║      ${FROST}\\:\\  \\         |:|\\/__/     \\:\\ \\/__/     \\:\\ \\/__/${ICE_BLUE}     ║
-     ║       ${FROST}\\:\\__\\        |:|  |        \\:\\__\\        \\:\\__\\${ICE_BLUE}       ║
-     ║        ${FROST}\\/__/         \\|__|         \\/__/         \\/__/${ICE_BLUE}       ║
-     ║                                                               ║
-     ║           ${FROST}❄${ICE_BLUE} Kubernetes Forensics & Live Containment ${FROST}❄${ICE_BLUE}       ║
-     ║                                                               ║
-     ╚═══════════════════════════════════════════════════════════════╝
-${RESET}
-EOF
-}
-
-# Show help
-cmd_help() {
-    print_banner
+cmd_list_demos() {
+    echo "Available demos:"
     echo ""
+    while IFS='|' read -r path name desc; do
+        local current=$(get_current_demo)
+        local mark="  "
+        if [ "$(basename "$path")" = "$current" ]; then
+            mark="${GREEN}* ${NC}"
+        fi
+        echo "$mark${BOLD}$name${NC} ($(basename "$path"))"
+        echo "    $desc"
+        echo ""
+    done < <(list_demos_formatted)
+}
+
+cmd_help() {
     cat << EOF
-${BOLD}USAGE:${NC}
-  cfreeze <command> [options]
+CONTAINER FREEZE - Kubernetes Forensics & Live Containment
 
-${BOLD}COMMANDS:${NC}
-  ${GREEN}status${NC}              Show environment status (VM, K3s, POC, images)
+USAGE:
+  cfreeze                     Interactive mode (recommended)
+  cfreeze <command> [args]    CLI mode
 
-  ${GREEN}setup${NC}               Full setup (VM + K3s + POC deployment)
-                      Options: --external-c2 <IP>
+COMMANDS:
+  status              Show environment status (VM, K3s, current demo)
+  setup               Full setup (VM + K3s), then select demo
+  demo [name]         Select and run a demo interactively, or run specific demo
+  list-demos          List all available demo scenarios
+  reset               Reset K3s and redeploy current demo
+  cleanup             Remove K3s cluster only (preserves VM)
+  destroy             Full cleanup (removes VM and all data)
+  ssh                 SSH into the VM
+  help                Show this help message
 
-  ${GREEN}build${NC}               Build container images locally (faster subsequent setups)
+INTERACTIVE MODE:
+  Run 'cfreeze' with no arguments for an interactive menu.
+  Navigate with arrow keys and Enter.
 
-  ${GREEN}demo${NC}                Run the full attack demo
-                      Options: --external-c2 <IP>
+DEMO WORKFLOW:
+  cfreeze                    # Start interactive mode
+  > Setup                    # Create VM + K3s
+  > Demo                     # Select and run a demo
+  > Reset                    # Reset for another run
 
-  ${GREEN}reset${NC}               Quick reset: cleanup cluster + reinstall K3s + redeploy POC
-                      ${YELLOW}Preserves:${NC} VM and Docker images
-                      ${YELLOW}Time:${NC} ~1-2 minutes vs ~4 minutes full setup
+CLI WORKFLOW:
+  cfreeze setup              # Create VM + K3s
+  cfreeze demo payment-breach  # Run specific demo
+  cfreeze reset              # Reset cluster
+  cfreeze destroy            # Cleanup when done
 
-  ${GREEN}cleanup${NC}             Remove K3s cluster only
-                      ${YELLOW}Preserves:${NC} VM and Docker images
+DEMO SWITCHING:
+  When switching between demos, the K3s cluster is fully reset
+  to ensure a clean state. This takes about 1-2 minutes.
 
-  ${GREEN}destroy${NC}             Full cleanup (VM + all resources)
+MORE INFO:
+  Demos are located in the demos/ directory.
+  Each demo has its own application, attack, and detection policies.
 
-  ${GREEN}ssh${NC}                 SSH into the VM
-
-  ${GREEN}help${NC}                Show this help message
-
-${BOLD}WORKFLOW:${NC}
-  ${CYAN}# First time setup${NC}
-  cfreeze setup
-
-  ${CYAN}# Optional: Build images for faster redeployment${NC}
-  cfreeze build
-
-  ${CYAN}# Run demo${NC}
-  cfreeze demo
-
-  ${CYAN}# Quick reset for another demo${NC}
-  cfreeze reset
-
-  ${CYAN}# Check status anytime${NC}
-  cfreeze status
-
-  ${CYAN}# Full cleanup when done${NC}
-  cfreeze destroy
-
-${BOLD}EXAMPLES:${NC}
-  cfreeze status
-  cfreeze setup
-  cfreeze demo
-  cfreeze reset
-  cfreeze setup --external-c2 192.168.1.50
-  cfreeze ssh
-
-${BOLD}MORE INFO:${NC}
-  GitHub: https://github.com/bertomaa/container-freeze
-  Docs:   README.md
 EOF
 }
 
-# Main command router
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
 main() {
-    # Show banner if no command given
+    # No args = interactive mode
     if [ $# -eq 0 ]; then
-        print_banner
-        echo ""
-        echo "Run ${CYAN}cfreeze help${NC} to see available commands"
-        echo "Run ${CYAN}cfreeze status${NC} to check environment status"
-        echo ""
-        exit 0
+        check_gum_installed
+        cmd_interactive
+        return
     fi
 
     local cmd="${1}"
@@ -366,25 +527,34 @@ main() {
             cmd_status "$@"
             ;;
         setup)
-            cmd_setup "$@"
+            check_gum_installed
+            cmd_setup_interactive
             ;;
-        build)
-            cmd_build "$@"
+        demo)
+            if [ $# -eq 0 ]; then
+                check_gum_installed
+                cmd_demo_interactive
+            else
+                check_gum_installed
+                cmd_demo_cli "$@"
+            fi
             ;;
-        demo|run)
-            cmd_demo "$@"
+        list-demos|demos)
+            cmd_list_demos
+            ;;
+        reset)
+            check_gum_installed
+            cmd_reset
             ;;
         cleanup|clean)
             cmd_cleanup "$@"
             ;;
-        reset|restart)
-            cmd_reset "$@"
-            ;;
         destroy)
-            cmd_destroy "$@"
+            check_gum_installed
+            cmd_destroy_interactive
             ;;
         ssh)
-            cmd_ssh "$@"
+            cmd_ssh
             ;;
         help|--help|-h)
             cmd_help

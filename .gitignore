@@ -16,6 +16,9 @@ vm/meta-data
 # VM connection info (contains IP and paths)
 vm/connection.env
 
+# Current demo state
+vm/current-demo.env
+
 # SSH keys (security)
 vm/id_rsa
 vm/id_rsa.pub

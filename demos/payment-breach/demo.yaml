@@ -1,0 +1,38 @@
+name: payment-breach
+display_name: "Payment System Breach"
+description: "Supply chain attack on a payment processor with reverse shell and credential theft"
+version: "1.0.0"
+
+scenario:
+  attack_type: "supply-chain-injection"
+  threat_actor: "APT-style"
+  objectives:
+    - "Credential theft"
+    - "C2 establishment"
+    - "Data exfiltration"
+
+images:
+  - name: vulnerable-app
+    path: ./app
+  - name: sleepy-malware
+    path: ./malware
+  - name: c2-server
+    path: ./c2-server
+
+deployments:
+  - ./c2-server/deployment.yaml
+  - ./app/deployment.yaml
+
+detection_policies:
+  - ./detection/tracing-policy-reverse-shell.yaml
+  - ./detection/tracing-policy-network.yaml
+  - ./detection/tracing-policy-fileless.yaml
+
+namespaces:
+  - production
+  - attacker-infra
+
+target_pod:
+  namespace: production
+  label: app=payment-processor
+  container: malware-sidecar
