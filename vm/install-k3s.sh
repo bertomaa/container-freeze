@@ -77,7 +77,45 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=tetragon -n kub
 REMOTE_TETRAGON
 echo "  ✓ Tetragon installed"
 
-echo "[7/7] Verifying installation..."
+echo "[7/8] Fixing CRIU tar compatibility..."
+$SSH << 'REMOTE_TAR_FIX'
+# K3s ships with BusyBox tar which is incompatible with CRIU
+# CRIU expects GNU tar and calls it with arguments that BusyBox doesn't support
+# Solution: Create a tar wrapper in k3s bin directory that fixes the invocation
+
+K3S_BIN=$(find /var/lib/rancher/k3s/data/*/bin -type d -name bin 2>/dev/null | head -1)
+if [ -n "$K3S_BIN" ]; then
+    # Remove the busybox tar symlink
+    sudo rm -f "$K3S_BIN/tar"
+
+    # Create a wrapper that calls GNU tar with correct arguments
+    sudo tee "$K3S_BIN/tar" > /dev/null << 'EOF'
+#!/bin/bash
+# CRIU tar wrapper - fixes invocation to use GNU tar
+# CRIU may call tar without specifying operation mode, so we add -c if needed
+if ! echo "$@" | grep -qE '(-c|-x|-t|-r|-u|-A|--create|--extract|--list)'; then
+    exec /usr/bin/tar -c "$@"
+else
+    exec /usr/bin/tar "$@"
+fi
+EOF
+    sudo chmod +x "$K3S_BIN/tar"
+    echo "  ✓ Created CRIU-compatible tar wrapper at $K3S_BIN/tar"
+else
+    echo "  ⚠ K3s bin directory not found - CRIU checkpointing may fail"
+fi
+
+# Also create CRIU config for better compatibility
+sudo mkdir -p /etc/criu
+sudo tee /etc/criu/runc.conf > /dev/null << 'EOF'
+tcp-established
+ghost-limit 0
+EOF
+echo "  ✓ Created CRIU configuration"
+REMOTE_TAR_FIX
+echo "  ✓ CRIU compatibility fixed"
+
+echo "[8/8] Verifying installation..."
 $SSH "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && kubectl get nodes && helm version --short"
 
 echo ""

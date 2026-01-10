@@ -89,8 +89,8 @@ deploy_demo() {
 
     print_step "Deploying demo: $demo_name"
 
-    # Create directory on VM
-    $SSH "mkdir -p ~/container-freeze/current-demo"
+    # Create clean directory on VM (remove old demo files)
+    $SSH "rm -rf ~/container-freeze/current-demo && mkdir -p ~/container-freeze/current-demo"
 
     # Copy demo files
     print_step "Copying demo files..."
@@ -100,11 +100,93 @@ deploy_demo() {
     $SCP -r "$PROJECT_ROOT/response" cfuser@$VM_IP:~/container-freeze/
     $SCP -r "$PROJECT_ROOT/forensics" cfuser@$VM_IP:~/container-freeze/
 
-    # Build images
+    # Build images (read from demo.yaml)
     print_step "Building container images..."
-    $SSH << 'REMOTE_BUILD'
+
+    # Parse demo.yaml for image definitions
+    local image_builds=""
+    if [ -f "$demo_path/demo.yaml" ]; then
+        # Extract image definitions from demo.yaml using awk for reliable multi-entry parsing
+        # This handles the images: section and extracts name/path pairs
+        image_builds=$(awk '
+            /^images:/ { in_images=1; next }
+            /^[a-z]/ { if (substr($0,1,2) != "  ") in_images=0 }
+            in_images && /^  - name:/ {
+                gsub(/^  - name: */, "")
+                gsub(/["'"'"']/, "")
+                name=$0
+            }
+            in_images && /^    path:/ {
+                gsub(/^    path: */, "")
+                gsub(/["'"'"']/, "")
+                if (name != "") {
+                    print name "|" $0
+                    name=""
+                }
+            }
+        ' "$demo_path/demo.yaml" 2>/dev/null)
+
+        # Show discovered images
+        while IFS='|' read -r img_name img_path; do
+            [ -z "$img_name" ] && continue
+            echo "  Found image: $img_name at $img_path"
+        done <<< "$image_builds"
+    fi
+
+    if [ -n "$image_builds" ]; then
+        # Use demo.yaml definitions
+        echo "  Building and importing images..."
+        while IFS='|' read -r img_name img_path; do
+            [ -z "$img_name" ] && continue
+            echo "  Processing $img_name..."
+
+            # Build and import image on VM
+            # Note: < /dev/null prevents SSH from consuming stdin (which breaks the while loop)
+            if ! $SSH "cd ~/container-freeze/current-demo && \
+                if [ ! -d '$img_path' ]; then \
+                    echo 'ERROR: Directory $img_path not found'; \
+                    exit 1; \
+                fi; \
+                if [ ! -f '$img_path/Dockerfile' ]; then \
+                    echo 'ERROR: Dockerfile not found in $img_path'; \
+                    exit 1; \
+                fi; \
+                echo '  -> Building Docker image...'; \
+                sudo docker build -t 'localhost/$img_name:latest' '$img_path' || exit 1; \
+                echo '  -> Saving and importing to k3s...'; \
+                sudo docker save 'localhost/$img_name:latest' | sudo k3s ctr images import - || exit 1; \
+                echo '  -> Verifying import...'; \
+                sudo k3s ctr images ls | grep -q 'localhost/$img_name:latest' || exit 1; \
+                echo '  ✓ localhost/$img_name:latest imported successfully'" < /dev/null; then
+                print_error "Failed to build/import image: $img_name"
+                print_error "Check that Docker and k3s are running on the VM"
+                return 1
+            fi
+        done <<< "$image_builds"
+
+        # Final verification
+        print_step "Verifying all images are available..."
+        local all_ok=true
+        while IFS='|' read -r img_name img_path; do
+            [ -z "$img_name" ] && continue
+            if $SSH "sudo k3s ctr images ls | grep -q 'localhost/$img_name:latest'" < /dev/null; then
+                echo "  ✓ localhost/$img_name:latest"
+            else
+                print_error "Image not found: localhost/$img_name:latest"
+                all_ok=false
+            fi
+        done <<< "$image_builds"
+
+        if [ "$all_ok" = false ]; then
+            print_error "Some images failed to import"
+            return 1
+        fi
+    else
+        # Fallback to legacy hardcoded dirs for backward compatibility
+        echo "  No images defined in demo.yaml, using legacy detection..."
+        $SSH << 'REMOTE_BUILD'
 cd ~/container-freeze/current-demo
-for img_dir in app malware c2-server; do
+for img_dir in app malware c2-server payload-server; do
     if [ -d "$img_dir" ] && [ -f "$img_dir/Dockerfile" ]; then
         name=$(basename "$img_dir")
         case "$name" in
@@ -113,12 +195,19 @@ for img_dir in app malware c2-server; do
             c2-server) image_name="c2-server" ;;
             *) image_name="$name" ;;
         esac
-        echo "Building $image_name..."
-        sudo docker build -t "localhost/$image_name:latest" "./$img_dir"
-        sudo docker save "localhost/$image_name:latest" | sudo k3s ctr images import -
+        echo "  Building $image_name from $img_dir..."
+        sudo docker build -t "localhost/$image_name:latest" "./$img_dir" || exit 1
+        echo "  Importing to k3s..."
+        sudo docker save "localhost/$image_name:latest" | sudo k3s ctr images import - || exit 1
+        echo "  ✓ $image_name imported"
     fi
 done
 REMOTE_BUILD
+        if [ $? -ne 0 ]; then
+            print_error "Failed to build images using legacy method"
+            return 1
+        fi
+    fi
 
     # Apply detection policies (Tetragon installed as base infrastructure in install-k3s.sh)
     print_step "Applying detection policies..."
@@ -136,19 +225,39 @@ if [ -d "detection" ]; then
 fi
 REMOTE_POLICIES
 
-    # Apply deployments
+    # Apply deployments (read from demo.yaml)
     print_step "Deploying workloads..."
-    $SSH << 'REMOTE_DEPLOY'
+
+    # Extract deployment files from demo.yaml (stop at next top-level key)
+    local deployment_files=""
+    if [ -f "$demo_path/demo.yaml" ]; then
+        deployment_files=$(awk '/^deployments:/{found=1; next} /^[a-z]/{found=0} found && /^  - /{gsub(/^  - ["'"'"']?|["'"'"']?$/,""); print}' "$demo_path/demo.yaml" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$deployment_files" ]; then
+        # Apply deployments in order from demo.yaml
+        while IFS= read -r deploy_file; do
+            [ -z "$deploy_file" ] && continue
+            echo "  Applying $deploy_file..."
+            # Note: < /dev/null prevents SSH from consuming stdin (which breaks the while loop)
+            $SSH "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && \
+                cd ~/container-freeze/current-demo && \
+                kubectl apply -f '$deploy_file'" < /dev/null
+        done <<< "$deployment_files"
+    else
+        # Fallback to legacy hardcoded paths
+        $SSH << 'REMOTE_DEPLOY'
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 cd ~/container-freeze/current-demo
-# Apply c2-server first if exists
 [ -f c2-server/deployment.yaml ] && kubectl apply -f c2-server/deployment.yaml
-# Apply main app deployment
 [ -f app/deployment.yaml ] && kubectl apply -f app/deployment.yaml
-# Wait for pods
-echo "Waiting for pods to be ready..."
-kubectl wait --for=condition=ready pod -l app -A --timeout=120s 2>/dev/null || true
 REMOTE_DEPLOY
+    fi
+
+    # Wait for pods
+    print_step "Waiting for pods..."
+    $SSH "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && \
+        kubectl wait --for=condition=ready pod -l app -A --timeout=120s 2>/dev/null || true"
 
     # Update state file
     cat > "$CURRENT_DEMO_FILE" << EOF
@@ -209,4 +318,43 @@ switch_demo() {
 
     # Deploy the new demo
     deploy_demo "$new_demo_path"
+}
+
+# Rerun demo from scratch (reset + redeploy + run)
+# Usage: rerun_demo_from_scratch <demo_path>
+rerun_demo_from_scratch() {
+    local demo_path="$1"
+    local demo_name=$(basename "$demo_path")
+    local current_demo=$(get_current_demo)
+
+    print_header "Rerunning Demo from Scratch: $(get_demo_info "$demo_path" "display_name")"
+    print_warning "This will reset the K3s cluster, redeploy, and run the demo"
+
+    if [ -n "$current_demo" ]; then
+        print_step "Current demo: '$current_demo'"
+    fi
+
+    if ! gum confirm "Continue with full reset?"; then
+        return 0
+    fi
+
+    # Step 1: Clean K3s for fresh state
+    print_step "Step 1/3: Cleaning K3s cluster..."
+    gum spin --spinner dot --title "Uninstalling K3s..." -- "$PROJECT_ROOT/cleanup-cluster.sh"
+
+    print_step "Reinstalling K3s..."
+    gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+
+    # Step 2: Deploy the demo
+    print_step "Step 2/3: Deploying demo..."
+    deploy_demo "$demo_path"
+
+    if [ $? -ne 0 ]; then
+        print_error "Failed to deploy demo"
+        return 1
+    fi
+
+    # Step 3: Run the demo
+    print_step "Step 3/3: Running demo..."
+    run_demo "$demo_path"
 }

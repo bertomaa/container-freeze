@@ -24,6 +24,7 @@ echo "[2/4] Installing Tetragon..."
 TETRAGON_INSTALLED=false
 
 if helm install tetragon cilium/tetragon \
+  --version 1.6.0 \
   --namespace kube-system \
   --set tetragon.enabled=true \
   --set tetragon.grpc.enabled=true \
