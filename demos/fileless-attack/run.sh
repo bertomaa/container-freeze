@@ -131,7 +131,9 @@ else
 fi
 
 echo "[*] Payload server logs (evidence of download):"
-kubectl logs -n malicious-cdn -l app=payload-server --tail=10 2>&1 | grep -E "DOWNLOAD|EXFIL|payload" || echo "    (checking for download evidence...)"
+kubectl logs -n malicious-cdn -l app=payload-server --tail=10 2>&1 | grep -Ei "DOWNLOAD|EXFIL|payload" || echo "    (checking for download evidence...)"
+MALICIOUS_SERVER_POD_NAME=$(kubectl get pods -n malicious-cdn -l app=payload-server -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n malicious-cdn "$MALICIOUS_SERVER_POD_NAME" -- cat /var/log/payload/downloads.log
 echo ""
 
 pause_interactive "Press ENTER to capture forensic checkpoint..."

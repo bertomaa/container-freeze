@@ -157,6 +157,7 @@ class PayloadHandler(BaseHTTPRequestHandler):
             # Log this event
             with open('/var/log/payload/downloads.log', 'a') as f:
                 f.write(f'{timestamp} - {self.client_address[0]} downloaded payload\n')
+            print(f'{timestamp} - {self.client_address[0]} downloaded payload\n')
 
             self.send_response(200)
             self.send_header('Content-Type', 'text/plain')

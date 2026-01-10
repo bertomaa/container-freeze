@@ -3,16 +3,14 @@ kind: TracingPolicy
 metadata:
   name: detect-and-freeze-fileless-exec
 spec:
-  # ============================================================================
-  # BLOCKING MODE - SIGSTOP on suspicious activity
-  # When malicious activity is detected, the process is FROZEN (not killed)
-  # This allows CRIU to checkpoint the process and capture evidence
-  # before termination.
-  # ============================================================================
+  # SAFETY FIX: Only apply this policy to the victim pod
+  # This protects kube-system and host processes from being frozen
+  podSelector:
+    matchLabels:
+      app: payment-backend
 
   kprobes:
-  # Monitor access to Kubernetes service account token (credential theft)
-  # This is the PRIMARY trigger - when malware tries to steal K8s credentials
+  # 1. BLOCKING: Credential Theft (Token & Env Vars)
   - call: "sys_openat"
     syscall: true
     args:
@@ -27,18 +25,33 @@ spec:
       - index: 1
         operator: "Prefix"
         values:
-        - "/var/run/secrets/kubernetes.io/"
+        - "/var/run/secrets/kubernetes.io/serviceaccount"
+        - "/proc/self/environ"
+        - "/etc/shadow"
       matchActions:
       - action: Signal
-        argSig: 19  # SIGSTOP - freeze process for forensic capture
-      matchNamespaces:
-      - namespace: Mnt
-        operator: NotIn
-        values:
-        - "/proc/1/ns/mnt"  # Exclude host namespace
+        argSig: 19  # SIGSTOP
 
-  # Monitor Python interpreter making network connections
-  # Detects payload download phase
+  # Fallback for 'open' syscall (legacy compatibility)
+  - call: "sys_open"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "int"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Prefix"
+        values:
+        - "/var/run/secrets/kubernetes.io/serviceaccount"
+        - "/proc/self/environ"
+      matchActions:
+      - action: Signal
+        argSig: 19
+
+  # 2. LOGGING: Network Connect (Allow download, just log it)
   - call: "tcp_connect"
     syscall: false
     return: true
@@ -53,50 +66,6 @@ spec:
       - operator: "In"
         values:
         - "/usr/local/bin/python3"
-        - "/usr/local/bin/python3.11"
         - "/usr/bin/python3"
-        - "/usr/bin/python"
       matchActions:
-      - action: Post  # Log network connections (don't block yet)
-
-  # Monitor memfd_create for advanced fileless techniques
-  - call: "sys_memfd_create"
-    syscall: true
-    args:
-    - index: 0
-      type: "string"
-    - index: 1
-      type: "uint32"
-    selectors:
-    - matchActions:
-      - action: Signal
-        argSig: 19  # SIGSTOP - freeze process
-      matchNamespaces:
-      - namespace: Mnt
-        operator: NotIn
-        values:
-        - "/proc/1/ns/mnt"
-
-  # Monitor access to other sensitive files
-  - call: "sys_openat"
-    syscall: true
-    args:
-    - index: 0
-      type: "int"
-    - index: 1
-      type: "string"
-    selectors:
-    - matchArgs:
-      - index: 1
-        operator: "Prefix"
-        values:
-        - "/etc/shadow"
-        - "/root/.ssh/"
-      matchActions:
-      - action: Signal
-        argSig: 19
-      matchNamespaces:
-      - namespace: Mnt
-        operator: NotIn
-        values:
-        - "/proc/1/ns/mnt"
+      - action: Post
