@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: malicious-cdn
+  labels:
+    purpose: demo-payload-server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payload-server
+  namespace: malicious-cdn
+spec:
+  selector:
+    app: payload-server
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payload-server
+  namespace: malicious-cdn
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payload-server
+  template:
+    metadata:
+      labels:
+        app: payload-server
+    spec:
+      containers:
+      - name: server
+        image: localhost/payload-server:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080

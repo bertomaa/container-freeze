@@ -1,0 +1,90 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-fileless-python-exec
+spec:
+  # Detect Python processes making network connections (common for fileless malware)
+  # Pattern: Python interpreter fetching and executing remote code
+  kprobes:
+  # Monitor Python interpreter spawning
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "char_buf"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Postfix"
+        values:
+        - "/python"
+        - "/python3"
+        - "/python3.11"
+      matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []
+
+  # Detect urlopen/urllib calls (Python fetching remote content)
+  # This catches the pattern of downloading scripts before exec()
+  - call: "tcp_connect"
+    syscall: false
+    return: true
+    args:
+    - index: 0
+      type: "sock"
+    returnArg:
+      index: 0
+      type: "int"
+    selectors:
+    - matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []
+
+  # Detect execution from /dev/shm or memfd (advanced fileless techniques)
+  - call: "sys_memfd_create"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "uint32"
+    selectors:
+    - matchActions:
+      - action: Post
+      matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []
+
+  # Monitor file reads of sensitive paths (credential access)
+  - call: "sys_openat"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"
+    - index: 1
+      type: "string"
+    - index: 2
+      type: "int"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: "Prefix"
+        values:
+        - "/var/run/secrets/kubernetes.io/"
+        - "/etc/shadow"
+        - "/root/.ssh/"
+      matchActions:
+      - action: Post
+      matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []

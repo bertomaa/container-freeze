@@ -1,0 +1,81 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-payload-download
+spec:
+  # Monitor all outbound TCP connections from monitored pods
+  # This catches the payload download and exfiltration
+  kprobes:
+  - call: "tcp_connect"
+    syscall: false
+    return: true
+    args:
+    - index: 0
+      type: "sock"
+    returnArg:
+      index: 0
+      type: "int"
+    selectors:
+    - matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []
+
+  # Monitor DNS queries (to detect malicious-cdn resolution)
+  - call: "udp_sendmsg"
+    syscall: false
+    args:
+    - index: 0
+      type: "sock"
+    selectors:
+    - matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []
+
+  # Detect HTTP library usage in Python (urllib, requests)
+  # Pattern: socket() -> connect() -> send() -> recv()
+  - call: "sys_socket"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"
+    - index: 1
+      type: "int"
+    - index: 2
+      type: "int"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Equal"
+        values:
+        - "2"  # AF_INET
+      - index: 1
+        operator: "Equal"
+        values:
+        - "1"  # SOCK_STREAM
+      matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []
+
+  # Monitor sendto/sendmsg for data exfiltration
+  - call: "sys_sendto"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"
+    - index: 1
+      type: "char_buf"
+      sizeArgIndex: 2
+    - index: 2
+      type: "size_t"
+    selectors:
+    - matchPIDs:
+      - operator: In
+        followForks: true
+        isNamespacePID: false
+        values: []

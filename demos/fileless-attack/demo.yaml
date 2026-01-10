@@ -1,0 +1,36 @@
+name: fileless-attack
+display_name: "Fileless Supply Chain Attack"
+description: "Supply chain attack demonstrating fileless malware execution - malicious binary embedded in backend image downloads and executes script entirely in memory"
+version: "1.0.0"
+
+scenario:
+  attack_type: "supply-chain-fileless"
+  threat_actor: "APT-style"
+  objectives:
+    - "Fileless script execution (memory-only)"
+    - "Credential theft"
+    - "Data exfiltration"
+    - "Demonstrate CRIU memory capture of in-memory scripts"
+
+images:
+  - name: payment-backend
+    path: ./app
+  - name: payload-server
+    path: ./payload-server
+
+deployments:
+  - ./payload-server/deployment.yaml
+  - ./app/deployment.yaml
+
+detection_policies:
+  - ./detection/tracing-policy-fileless-exec.yaml
+  - ./detection/tracing-policy-network.yaml
+
+namespaces:
+  - production
+  - malicious-cdn
+
+target_pod:
+  namespace: production
+  label: app=payment-backend
+  container: backend
