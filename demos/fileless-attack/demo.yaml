@@ -1,15 +1,19 @@
 name: fileless-attack
 display_name: "Fileless Supply Chain Attack"
-description: "Supply chain attack demonstrating fileless malware execution - malicious binary embedded in backend image downloads and executes script entirely in memory"
-version: "1.0.0"
+description: "API-triggered fileless malware via hidden backdoor in health endpoint - Tetragon BLOCKS with SIGSTOP and CRIU captures in-memory script"
+version: "2.0.0"
 
 scenario:
   attack_type: "supply-chain-fileless"
+  trigger: "GET /api/health with X-Debug: enable header"
+  detection: "Tetragon SIGSTOP on credential file access"
+  response: "CRIU checkpoint before termination"
   threat_actor: "APT-style"
   objectives:
     - "Fileless script execution (memory-only)"
-    - "Credential theft"
+    - "Credential theft from Kubernetes service account"
     - "Data exfiltration"
+    - "Demonstrate Tetragon blocking mode (SIGSTOP)"
     - "Demonstrate CRIU memory capture of in-memory scripts"
 
 images:

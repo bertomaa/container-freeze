@@ -1,69 +1,18 @@
 apiVersion: cilium.io/v1alpha1
 kind: TracingPolicy
 metadata:
-  name: detect-fileless-python-exec
+  name: detect-and-freeze-fileless-exec
 spec:
-  # Detect Python processes making network connections (common for fileless malware)
-  # Pattern: Python interpreter fetching and executing remote code
+  # ============================================================================
+  # BLOCKING MODE - SIGSTOP on suspicious activity
+  # When malicious activity is detected, the process is FROZEN (not killed)
+  # This allows CRIU to checkpoint the process and capture evidence
+  # before termination.
+  # ============================================================================
+
   kprobes:
-  # Monitor Python interpreter spawning
-  - call: "sys_execve"
-    syscall: true
-    args:
-    - index: 0
-      type: "string"
-    - index: 1
-      type: "char_buf"
-    selectors:
-    - matchArgs:
-      - index: 0
-        operator: "Postfix"
-        values:
-        - "/python"
-        - "/python3"
-        - "/python3.11"
-      matchPIDs:
-      - operator: In
-        followForks: true
-        isNamespacePID: false
-        values: []
-
-  # Detect urlopen/urllib calls (Python fetching remote content)
-  # This catches the pattern of downloading scripts before exec()
-  - call: "tcp_connect"
-    syscall: false
-    return: true
-    args:
-    - index: 0
-      type: "sock"
-    returnArg:
-      index: 0
-      type: "int"
-    selectors:
-    - matchPIDs:
-      - operator: In
-        followForks: true
-        isNamespacePID: false
-        values: []
-
-  # Detect execution from /dev/shm or memfd (advanced fileless techniques)
-  - call: "sys_memfd_create"
-    syscall: true
-    args:
-    - index: 0
-      type: "string"
-    - index: 1
-      type: "uint32"
-    selectors:
-    - matchActions:
-      - action: Post
-      matchPIDs:
-      - operator: In
-        followForks: true
-        isNamespacePID: false
-        values: []
-
-  # Monitor file reads of sensitive paths (credential access)
+  # Monitor access to Kubernetes service account token (credential theft)
+  # This is the PRIMARY trigger - when malware tries to steal K8s credentials
   - call: "sys_openat"
     syscall: true
     args:
@@ -79,12 +28,75 @@ spec:
         operator: "Prefix"
         values:
         - "/var/run/secrets/kubernetes.io/"
+      matchActions:
+      - action: Signal
+        argSig: 19  # SIGSTOP - freeze process for forensic capture
+      matchNamespaces:
+      - namespace: Mnt
+        operator: NotIn
+        values:
+        - "/proc/1/ns/mnt"  # Exclude host namespace
+
+  # Monitor Python interpreter making network connections
+  # Detects payload download phase
+  - call: "tcp_connect"
+    syscall: false
+    return: true
+    args:
+    - index: 0
+      type: "sock"
+    returnArg:
+      index: 0
+      type: "int"
+    selectors:
+    - matchBinaries:
+      - operator: "In"
+        values:
+        - "/usr/local/bin/python3"
+        - "/usr/local/bin/python3.11"
+        - "/usr/bin/python3"
+        - "/usr/bin/python"
+      matchActions:
+      - action: Post  # Log network connections (don't block yet)
+
+  # Monitor memfd_create for advanced fileless techniques
+  - call: "sys_memfd_create"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    - index: 1
+      type: "uint32"
+    selectors:
+    - matchActions:
+      - action: Signal
+        argSig: 19  # SIGSTOP - freeze process
+      matchNamespaces:
+      - namespace: Mnt
+        operator: NotIn
+        values:
+        - "/proc/1/ns/mnt"
+
+  # Monitor access to other sensitive files
+  - call: "sys_openat"
+    syscall: true
+    args:
+    - index: 0
+      type: "int"
+    - index: 1
+      type: "string"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: "Prefix"
+        values:
         - "/etc/shadow"
         - "/root/.ssh/"
       matchActions:
-      - action: Post
-      matchPIDs:
-      - operator: In
-        followForks: true
-        isNamespacePID: false
-        values: []
+      - action: Signal
+        argSig: 19
+      matchNamespaces:
+      - namespace: Mnt
+        operator: NotIn
+        values:
+        - "/proc/1/ns/mnt"

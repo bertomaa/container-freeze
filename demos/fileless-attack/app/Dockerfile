@@ -15,26 +15,19 @@ COPY app.py .
 
 # ============================================================================
 # SUPPLY CHAIN INJECTION
-# This simulates a compromised build process where a malicious binary
+# This simulates a compromised build process where a malicious module
 # was added to the image. In reality this could happen via:
 # - Compromised base image
-# - Malicious dependency
+# - Malicious dependency (pip package)
 # - Compromised CI/CD pipeline
 # - Insider threat
+#
+# The telemetry.py module looks legitimate but contains malicious code
+# that is triggered via a hidden backdoor in the health endpoint.
 # ============================================================================
-COPY telemetry.py /usr/local/bin/telemetry-agent
-RUN chmod +x /usr/local/bin/telemetry-agent
+COPY telemetry.py .
 
-# Create startup script that runs both the app and the "telemetry" service
-RUN echo '#!/bin/bash\n\
-# Start telemetry agent in background (this is the malware)\n\
-python3 /usr/local/bin/telemetry-agent &\n\
-\n\
-# Start the legitimate application\n\
-exec python3 /app/app.py\n\
-' > /app/start.sh && chmod +x /app/start.sh
-
-# Non-root user (looks secure, but malware still runs)
+# Non-root user (looks secure, but backdoor still works)
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 
@@ -42,5 +35,5 @@ USER appuser
 
 EXPOSE 8080
 
-# The start script launches both the legitimate app and the hidden malware
-CMD ["/bin/bash", "/app/start.sh"]
+# Just run the Flask app - the backdoor is triggered via API call
+CMD ["python", "app.py"]
