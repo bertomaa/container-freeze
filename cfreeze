@@ -183,6 +183,7 @@ $demo_desc"
             --header "What would you like to do?" \
             "Run Demo" \
             "Deploy Only" \
+            "Update Files" \
             "Rerun from Scratch" \
             "Back")
 
@@ -202,6 +203,10 @@ $demo_desc"
                         switch_demo "$demo_path"
                     fi
                 fi
+                pause_continue
+                ;;
+            "Update Files")
+                update_demo_files "$demo_path"
                 pause_continue
                 ;;
             "Rerun from Scratch")
@@ -476,6 +481,29 @@ cmd_ssh() {
     "$VM_DIR/ssh.sh"
 }
 
+cmd_update_files_cli() {
+    local demo_name="$1"
+
+    if [ -z "$demo_name" ]; then
+        # Use current demo or show usage
+        demo_name=$(get_current_demo)
+        if [ -z "$demo_name" ]; then
+            print_error "No demo specified and no current demo deployed"
+            echo ""
+            echo "Usage: cfreeze update-files [demo-name]"
+            return 1
+        fi
+    fi
+
+    local demo_path="$DEMOS_DIR/$demo_name"
+    if [ ! -d "$demo_path" ]; then
+        print_error "Demo '$demo_name' not found"
+        return 1
+    fi
+
+    update_demo_files "$demo_path"
+}
+
 cmd_list_demos() {
     echo "Available demos:"
     echo ""
@@ -504,6 +532,7 @@ COMMANDS:
   setup               Full setup (VM + K3s), then select demo
   demo [name]         Select and run a demo interactively, or run specific demo
   rerun [name]        Rerun demo from scratch (reset + redeploy + run)
+  update-files [name] Update demo files only (no image rebuild, no redeploy)
   list-demos          List all available demo scenarios
   reset               Destroy VM and recreate it from scratch (VM + K3s)
   cleanup             Remove K3s cluster only (preserves VM)
@@ -526,6 +555,7 @@ CLI WORKFLOW:
   cfreeze demo payment-breach      # Run specific demo
   cfreeze rerun payment-breach     # Reset + redeploy + run demo
   cfreeze rerun                    # Rerun current demo from scratch
+  cfreeze update-files             # Sync local file changes to VM
   cfreeze reset                    # Reset cluster
   cfreeze destroy                  # Cleanup when done
 
@@ -538,6 +568,12 @@ RERUN FROM SCRATCH:
   1. Cleans and reinstalls K3s cluster
   2. Redeploys the demo from scratch
   3. Automatically runs the demo
+
+UPDATE FILES:
+  The 'update-files' command syncs local demo files to the VM without:
+  - Rebuilding container images
+  - Reapplying Kubernetes deployments
+  Useful for quickly iterating on scripts like run.sh or detection policies.
 
 MORE INFO:
   Demos are located in the demos/ directory.
@@ -581,6 +617,9 @@ main() {
         rerun)
             check_gum_installed
             cmd_rerun_cli "$@"
+            ;;
+        update-files|update)
+            cmd_update_files_cli "$@"
             ;;
         list-demos|demos)
             cmd_list_demos

@@ -286,6 +286,16 @@ run_demo() {
 
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -t cfuser@"$VM_IP" \
         "cd ~/container-freeze/current-demo && ./run.sh"
+
+    # Copy logs back to host
+    local SCP="scp -i $SSH_KEY -o StrictHostKeyChecking=no"
+    if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no cfuser@"$VM_IP" \
+        "test -d ~/container-freeze/current-demo/logs" 2>/dev/null; then
+        mkdir -p "$demo_path/logs"
+        $SCP -r cfuser@"$VM_IP":~/container-freeze/current-demo/logs/* "$demo_path/logs/" 2>/dev/null || true
+        echo ""
+        echo "Logs copied to: $demo_path/logs/"
+    fi
 }
 
 # Switch to a different demo (full K3s reset)
@@ -318,6 +328,37 @@ switch_demo() {
 
     # Deploy the new demo
     deploy_demo "$new_demo_path"
+}
+
+# Update demo files only (no rebuild, no redeploy)
+# Usage: update_demo_files <demo_path>
+update_demo_files() {
+    local demo_path="$1"
+    local demo_name=$(basename "$demo_path")
+
+    if [ ! -f "$VM_DIR/connection.env" ]; then
+        print_error "VM not set up. Run setup first."
+        return 1
+    fi
+
+    source "$VM_DIR/connection.env"
+    local SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
+    local SCP="scp -i $SSH_KEY -o StrictHostKeyChecking=no"
+
+    print_step "Updating demo files: $demo_name"
+
+    # Create directory if it doesn't exist (but don't wipe it)
+    $SSH "mkdir -p ~/container-freeze/current-demo"
+
+    # Copy demo files
+    print_step "Copying demo files..."
+    $SCP -r "$demo_path"/* cfuser@$VM_IP:~/container-freeze/current-demo/
+
+    # Copy shared utilities
+    $SCP -r "$PROJECT_ROOT/response" cfuser@$VM_IP:~/container-freeze/
+    $SCP -r "$PROJECT_ROOT/forensics" cfuser@$VM_IP:~/container-freeze/
+
+    print_success "Demo files updated (images and deployments unchanged)"
 }
 
 # Rerun demo from scratch (reset + redeploy + run)

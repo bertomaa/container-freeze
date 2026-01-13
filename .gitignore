@@ -184,4 +184,5 @@ htmlcov/
 *.zip
 *.rar
 
-*.md
+
+*logs/*

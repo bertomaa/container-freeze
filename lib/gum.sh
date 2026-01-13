@@ -21,15 +21,23 @@ check_gum_installed() {
 # Print the main banner
 print_banner() {
     gum style \
-        --border double \
-        --border-foreground 14 \
-        --padding "1 2" \
+        --foreground 14 \
         --margin "1 0" \
-        --align center \
-        "$(gum style --foreground 14 --bold '❄  CONTAINER FREEZE  ❄')
-$(gum style --foreground 7 'They are Inside. Now What?')
+'              ·  ❄  ·     ·  ❄  ·     ·  ❄  ·
 
-$(gum style --foreground 12 'Kubernetes Forensics & Live Containment')"
+  ██████╗███████╗██████╗ ███████╗███████╗███████╗███████╗
+ ██╔════╝██╔════╝██╔══██╗██╔════╝██╔════╝╚══███╔╝██╔════╝
+ ██║     █████╗  ██████╔╝█████╗  █████╗    ███╔╝ █████╗
+ ██║     ██╔══╝  ██╔══██╗██╔══╝  ██╔══╝   ███╔╝  ██╔══╝
+ ╚██████╗██║     ██║  ██║███████╗███████╗███████╗███████╗
+  ╚═════╝╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝
+
+              ·  ❄  ·     ·  ❄  ·     ·  ❄  ·'
+    gum style \
+        --foreground 7 \
+        --align center \
+        --width 60 \
+        "They're Inside. Now What?"
 }
 
 # Print a styled header
