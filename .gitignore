@@ -8,10 +8,11 @@
 *.qcow2
 *.img
 
-# Cloud-init files (auto-generated)
+# Cloud-init / Lima config files (auto-generated at runtime)
 vm/cloud-init.iso
 vm/user-data
 vm/meta-data
+vm/lima-config.yaml
 
 # VM connection info (contains IP and paths)
 vm/connection.env

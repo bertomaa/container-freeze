@@ -77,11 +77,17 @@ gum_confirm() {
     gum confirm "$prompt"
 }
 
-# Show a spinner while running a command
+# Show a spinner while running a command.
+# On macOS, runs verbosely instead (Lima needs a TTY for output).
 gum_spin() {
     local title="$1"
     shift
-    gum spin --spinner dot --title "$title" -- "$@"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "▶ $title"
+        "$@"
+    else
+        gum spin --spinner dot --title "$title" -- "$@"
+    fi
 }
 
 # Display paged content

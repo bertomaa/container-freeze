@@ -5,6 +5,8 @@
 # Get project root (should be set by main script)
 : "${PROJECT_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
+source "$PROJECT_ROOT/lib/vm.sh"
+
 DEMOS_DIR="$PROJECT_ROOT/demos"
 VM_DIR="$PROJECT_ROOT/vm"
 CURRENT_DEMO_FILE="$VM_DIR/current-demo.env"
@@ -83,9 +85,7 @@ deploy_demo() {
         return 1
     fi
 
-    source "$VM_DIR/connection.env"
-    local SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
-    local SCP="scp -i $SSH_KEY -o StrictHostKeyChecking=no"
+    load_vm_connection || return 1
 
     print_step "Deploying demo: $demo_name"
 
@@ -263,7 +263,7 @@ REMOTE_DEPLOY
     cat > "$CURRENT_DEMO_FILE" << EOF
 CURRENT_DEMO=$demo_name
 CURRENT_DEMO_PATH=$demo_path
-DEPLOYED_AT=$(date -Iseconds)
+DEPLOYED_AT=$(date -u +"%Y-%m-%dT%H:%M:%S%z")
 EOF
 
     print_success "Demo '$demo_name' deployed successfully"
@@ -280,17 +280,14 @@ run_demo() {
         return 1
     fi
 
-    source "$VM_DIR/connection.env"
+    load_vm_connection || return 1
 
     print_header "Running Demo: $(get_demo_info "$demo_path" "display_name")"
 
-    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -t cfuser@"$VM_IP" \
-        "cd ~/container-freeze/current-demo && ./run.sh"
+    $SSH -t "cd ~/container-freeze/current-demo && ./run.sh"
 
     # Copy logs back to host
-    local SCP="scp -i $SSH_KEY -o StrictHostKeyChecking=no"
-    if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no cfuser@"$VM_IP" \
-        "test -d ~/container-freeze/current-demo/logs" 2>/dev/null; then
+    if $SSH "test -d ~/container-freeze/current-demo/logs" 2>/dev/null; then
         mkdir -p "$demo_path/logs"
         $SCP -r cfuser@"$VM_IP":~/container-freeze/current-demo/logs/* "$demo_path/logs/" 2>/dev/null || true
         echo ""
@@ -321,10 +318,10 @@ switch_demo() {
 
     # Clean K3s for fresh state
     print_step "Cleaning K3s cluster..."
-    gum spin --spinner dot --title "Uninstalling K3s..." -- "$PROJECT_ROOT/cleanup-cluster.sh"
+    gum_spin "Uninstalling K3s..." "$PROJECT_ROOT/cleanup-cluster.sh"
 
     print_step "Reinstalling K3s..."
-    gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+    gum_spin "Installing K3s..." "$PROJECT_ROOT/vm/install-k3s.sh"
 
     # Deploy the new demo
     deploy_demo "$new_demo_path"
@@ -341,9 +338,7 @@ update_demo_files() {
         return 1
     fi
 
-    source "$VM_DIR/connection.env"
-    local SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
-    local SCP="scp -i $SSH_KEY -o StrictHostKeyChecking=no"
+    load_vm_connection || return 1
 
     print_step "Updating demo files: $demo_name"
 
@@ -381,10 +376,10 @@ rerun_demo_from_scratch() {
 
     # Step 1: Clean K3s for fresh state
     print_step "Step 1/3: Cleaning K3s cluster..."
-    gum spin --spinner dot --title "Uninstalling K3s..." -- "$PROJECT_ROOT/cleanup-cluster.sh"
+    gum_spin "Uninstalling K3s..." "$PROJECT_ROOT/cleanup-cluster.sh"
 
     print_step "Reinstalling K3s..."
-    gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+    gum_spin "Installing K3s..." "$PROJECT_ROOT/vm/install-k3s.sh"
 
     # Step 2: Deploy the demo
     print_step "Step 2/3: Deploying demo..."

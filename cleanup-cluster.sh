@@ -8,13 +8,8 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VM_DIR="$PROJECT_ROOT/vm"
 
-if [ ! -f "$VM_DIR/connection.env" ]; then
-    echo "ERROR: VM not found. Nothing to clean up."
-    exit 1
-fi
-
-source "$VM_DIR/connection.env"
-SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
+source "$PROJECT_ROOT/lib/vm.sh"
+load_vm_connection || exit 1
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║      Container Freeze - Cluster Cleanup                      ║"
