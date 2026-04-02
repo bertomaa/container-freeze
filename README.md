@@ -40,8 +40,24 @@ Container Freeze simulates supply-chain attacks against containerized applicatio
 
 ## Quick Start
 
+### macOS
+
 ```bash
-# Install dependencies (Arch Linux)
+# Install dependencies
+brew install lima gum
+
+# Start the interactive CLI
+./cfreeze
+```
+
+Lima creates a QEMU/Ubuntu VM automatically — no KVM or libvirt required.
+
+> **Apple Silicon (M1/M2/M3):** The VM runs natively on arm64 at full speed. Intel Macs use the amd64 image.
+
+### Linux (Arch)
+
+```bash
+# Install dependencies
 sudo pacman -S gum libvirt qemu-desktop
 
 # Start the interactive CLI
@@ -55,10 +71,14 @@ The interactive menu will guide you through:
 
 ## Requirements
 
-- Linux host with KVM support
-- libvirt + QEMU
-- [gum](https://github.com/charmbracelet/gum) (for interactive UI)
-- ~4GB RAM and 20GB disk for the VM
+| | macOS | Linux |
+|---|---|---|
+| Virtualisation | [Lima](https://lima-vm.io/) (`brew install lima`) | libvirt + QEMU (`libvirt qemu-desktop`) |
+| UI | [gum](https://github.com/charmbracelet/gum) (`brew install gum`) | [gum](https://github.com/charmbracelet/gum) |
+| RAM | ~4GB | ~4GB |
+| Disk | ~20GB | ~20GB |
+
+> **Linux KVM:** Linux hosts require KVM support (`lsmod | grep kvm`). macOS hosts do not — Lima handles virtualisation transparently.
 
 ## Architecture
 
@@ -71,10 +91,10 @@ The interactive menu will guide you through:
 │  │  - Demo discovery & deployment                            │  │
 │  │  - VM lifecycle management                                │  │
 │  └───────────────────────────────────────────────────────────┘  │
-│                              │ SSH                              │
+│          │ SSH (Linux: libvirt · macOS: Lima port 2222)         │
 │                              ▼                                  │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                   LIBVIRT VM (Ubuntu 22.04)               │  │
+│  │            Ubuntu 22.04 VM (libvirt / Lima+QEMU)          │  │
 │  │  ┌─────────────────────────────────────────────────────┐  │  │
 │  │  │                   K3s Cluster                       │  │  │
 │  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │  │  │

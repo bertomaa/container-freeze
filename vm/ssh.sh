@@ -8,5 +8,7 @@ if [ ! -f "$VM_DIR/connection.env" ]; then
     exit 1
 fi
 
-source "$VM_DIR/connection.env"
-ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no cfuser@"$VM_IP" "$@"
+VM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$VM_DIR")/lib/vm.sh"
+load_vm_connection || exit 1
+$SSH "$@"

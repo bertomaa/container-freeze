@@ -77,11 +77,14 @@ gum_confirm() {
     gum confirm "$prompt"
 }
 
-# Show a spinner while running a command
+# Show a spinner while running a command.
+# Runs verbosely (no spinner) on all platforms so sudo prompts and
+# script output are always visible.
 gum_spin() {
     local title="$1"
     shift
-    gum spin --spinner dot --title "$title" -- "$@"
+    echo "▶ $title"
+    "$@"
 }
 
 # Display paged content

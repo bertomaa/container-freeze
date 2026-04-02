@@ -9,6 +9,7 @@ cd "$PROJECT_ROOT"
 
 # Source libraries
 source "$PROJECT_ROOT/lib/gum.sh"
+source "$PROJECT_ROOT/lib/vm.sh"
 source "$PROJECT_ROOT/lib/demos.sh"
 
 # Colors using tput (fallback for non-gum output)
@@ -35,9 +36,8 @@ VM_DIR="$PROJECT_ROOT/vm"
 
 # Check VM status
 check_vm() {
-    if [ -f "$VM_DIR/connection.env" ]; then
-        source "$VM_DIR/connection.env"
-        if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=2 cfuser@"$VM_IP" "exit" 2>/dev/null; then
+    if load_vm_connection 2>/dev/null; then
+        if $SSH -o ConnectTimeout=2 "exit" 2>/dev/null; then
             return 0
         fi
     fi
@@ -49,8 +49,7 @@ check_k3s() {
     if ! check_vm; then
         return 1
     fi
-    source "$VM_DIR/connection.env"
-    SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no cfuser@$VM_IP"
+    load_vm_connection 2>/dev/null
     if $SSH "kubectl get nodes" 2>/dev/null | grep -q "Ready"; then
         return 0
     fi
@@ -229,8 +228,8 @@ cmd_setup_interactive() {
         echo ""
 
         if gum confirm "This will create a new VM and install K3s. Continue?"; then
-            gum spin --spinner dot --title "Creating VM..." -- "$PROJECT_ROOT/vm/setup-vm.sh"
-            gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+            gum_spin "Creating VM..." "$PROJECT_ROOT/vm/setup-vm.sh"
+            gum_spin "Installing K3s..." "$PROJECT_ROOT/vm/install-k3s.sh"
 
             # Now select and deploy a demo
             echo ""
@@ -244,7 +243,7 @@ cmd_setup_interactive() {
 
         if ! check_k3s; then
             if gum confirm "K3s not running. Install K3s?"; then
-                gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+                gum_spin "Installing K3s..." "$PROJECT_ROOT/vm/install-k3s.sh"
             fi
         else
             gum style --foreground 2 "K3s is already running."
@@ -270,12 +269,12 @@ cmd_reset_interactive() {
         echo "Requesting sudo access..."
         sudo -v
 
-        gum spin --spinner dot --title "Destroying VM..." -- "$PROJECT_ROOT/destroy.sh"
+        gum_spin "Destroying VM..." "$PROJECT_ROOT/destroy.sh"
         # Clear current demo state
         rm -f "$CURRENT_DEMO_FILE"
 
-        gum spin --spinner dot --title "Creating VM..." -- "$PROJECT_ROOT/vm/setup-vm.sh"
-        gum spin --spinner dot --title "Installing K3s..." -- "$PROJECT_ROOT/vm/install-k3s.sh"
+        gum_spin "Creating VM..." "$PROJECT_ROOT/vm/setup-vm.sh"
+        gum_spin "Installing K3s..." "$PROJECT_ROOT/vm/install-k3s.sh"
 
         print_success "Reset complete! VM has been recreated."
         echo ""
