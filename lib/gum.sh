@@ -78,16 +78,13 @@ gum_confirm() {
 }
 
 # Show a spinner while running a command.
-# On macOS, runs verbosely instead (Lima needs a TTY for output).
+# Runs verbosely (no spinner) on all platforms so sudo prompts and
+# script output are always visible.
 gum_spin() {
     local title="$1"
     shift
-    if [ "$(uname -s)" = "Darwin" ]; then
-        echo "▶ $title"
-        "$@"
-    else
-        gum spin --spinner dot --title "$title" -- "$@"
-    fi
+    echo "▶ $title"
+    "$@"
 }
 
 # Display paged content

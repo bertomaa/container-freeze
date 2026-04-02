@@ -91,10 +91,10 @@ The interactive menu will guide you through:
 │  │  - Demo discovery & deployment                            │  │
 │  │  - VM lifecycle management                                │  │
 │  └───────────────────────────────────────────────────────────┘  │
-│                              │ SSH                              │
+│          │ SSH (Linux: libvirt · macOS: Lima port 2222)         │
 │                              ▼                                  │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                   LIBVIRT VM (Ubuntu 22.04)               │  │
+│  │            Ubuntu 22.04 VM (libvirt / Lima+QEMU)          │  │
 │  │  ┌─────────────────────────────────────────────────────┐  │  │
 │  │  │                   K3s Cluster                       │  │  │
 │  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │  │  │

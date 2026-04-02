@@ -10,7 +10,7 @@ VM_DIR="$PROJECT_ROOT/vm"
 VM_NAME="container-freeze-vm"
 VM_RAM="4096"
 VM_CPUS="2"
-VM_DISK="20GiB"
+VM_DISK="20G"  # overridden to 20GiB in setup_macos()
 
 # Lima SSH port for macOS
 LIMA_SSH_PORT="2222"
@@ -28,6 +28,7 @@ detect_os() {
 # ============================================================================
 
 setup_macos() {
+    VM_DISK="20GiB"  # Lima/QEMU on macOS requires GiB suffix
     echo "╔════════════════════════════════════════════════════════════════╗"
     echo "║    Container Freeze POC - VM Setup (macOS / Lima)            ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
