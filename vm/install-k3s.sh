@@ -33,7 +33,7 @@ echo "  ✓ Internet accessible"
 
 # Install packages
 echo "[2/6] Installing packages..."
-$SSH "sudo apt-get update && sudo apt-get install -y curl docker.io jq"
+$SSH "sudo apt-get update && sudo apt-get install -y curl docker.io jq criu"
 $SSH "sudo systemctl enable docker && sudo systemctl start docker"
 $SSH "sudo usermod -aG docker cfuser"
 echo "  ✓ Packages installed"
